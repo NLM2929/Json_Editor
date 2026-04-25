@@ -1,7 +1,3 @@
-#include"raylib.h"
-#include"raymath.h"
-#define RAYGUI_IMPLEMENTATION
-#include"raygui.h"
 #include<string>
 #include<nlohmann/json.hpp>
 #include<ctime>
@@ -13,6 +9,10 @@
 #include<mutex>
 #include<algorithm>
 #include<cctype>
+#include"raylib.h"
+#include"raymath.h"
+#define RAYGUI_IMPLEMENTATION
+#include"raygui.h"
 #include<pdcurses.h>
 
 #define TOTAL_AUTO_SAVE_PER_FILE 10
@@ -56,8 +56,8 @@ int InitMap(MapData& mapData, std::filesystem::path name, bool checked = false){
     return 0;
 }
 
-int SaveMap(MapData& map, std::filesystem::path filename){
-    filename.replace_extension(".json");
+int SaveMap(MapData& map, std::string filename){
+    filename += ".json";
     std::ofstream file(filename);
     if(!file.is_open()) {return 1;}
     std::string indent = "\t";
@@ -113,7 +113,7 @@ int SaveMap(MapData& map, std::filesystem::path filename){
     file << indent << "]\n";
     file << "}";
     file.close();
-    Print(TextFormat("Saved map to %s\n", filename.string().c_str()));
+    Print(TextFormat("Saved map to %s\n", filename.c_str()));
     return 0;
 }
 
@@ -475,19 +475,26 @@ int main(){
                             InitMap(map, (path + file_name).c_str(), true);
                             IsReady = true;
                         } else if(respond==3){
-                            std::filesystem::path base = path + file_name + ".json";
-                            base.replace_extension(".json");
-                            Print(TextFormat("Renaming %s", base.stem().string().c_str()));
-                            std::filesystem::path dir = base.parent_path();
-                            std::string stem = base.stem().string();
-                            std::filesystem::path ext = base.extension().string();
-                            std::filesystem::path candidate = base;
+                            // std::filesystem::path base = path + file_name + ".json";
+                            // base.replace_extension(".json");
+                            // Print(TextFormat("Renaming %s", base.stem().string().c_str()));
+                            // std::filesystem::path dir = base.parent_path();
+                            // std::string stem = base.stem().string();
+                            // std::filesystem::path ext = base.extension().string();
+                            // std::filesystem::path candidate = base;
+                            // unsigned short subfix = 1;
+                            // while(FileExists(candidate.string().c_str())){
+                                //     Print("Checking if " + candidate.string() + " exists...");
+                                //     candidate = dir / (stem + std::to_string(subfix++) + ext.string());
+                                // }
+                                // file_name = candidate.filename().string();
                             unsigned short subfix = 1;
-                            while(std::filesystem::exists(candidate)){
-                                Print("Checking if " + candidate.string() + " exists...");
-                                candidate = dir / (stem + std::to_string(subfix++) + ext.string());
+                            std::string candinate = file_name + "_" + std::to_string(subfix);
+                            while(FileExists((path + candinate + ".json").c_str())){
+                                Print("Checking if " + path + candinate + ".json exists");
+                                candinate = file_name + "_" + std::to_string(++subfix);
                             }
-                            file_name = candidate.filename().string();
+                            file_name = candinate;
                             Print("Renamed file to: " + path + file_name);
                             renamed = true;
                         }
@@ -500,6 +507,8 @@ int main(){
                             "Error", "Failed to load the file.", nullptr
                         );
                     }
+                    char input[100] = {0};
+                    strcpy(input, file_name.c_str());
                     bool BackBtn = GuiButton((Rectangle){
                         width*5.f/100.f, height*5.f/100.f,
                         50, 50
@@ -507,7 +516,7 @@ int main(){
                     InputTextBox = GuiTextBox((Rectangle){
                         width*20.f/100.f, height*10.f/100.f,
                         200, 50
-                    }, file_name.data(), 40, editing[0]),
+                    }, input, 40, editing[0]),
                     InputWidth = GuiValueBox((Rectangle){
                         width*20.f/100.f, height*10.f/100.f + 50*2,
                         200, 50
@@ -524,6 +533,7 @@ int main(){
                         width*75.f/100.f, height*75.f/100.f,
                         200, 50
                     }, "New");
+                    file_name = std::string(input);
                     if(BackBtn){state = 1;}
                     if(InputTextBox){
                         editing[0] = !editing[0];

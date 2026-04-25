@@ -7,7 +7,8 @@
                 "${workspaceFolder}/**",
                 "D:/NLM/C++_Libraries/json-develop/include/**",
                 "D:/NLM/C++_Libraries/raygui-master/src",
-                "D:/msys64/mingw64/include/**"
+                // "D:/msys64/mingw64/include/**"
+                "D:/msys64/mingw64/include/pdcurses/**"
             ],
             "defines": [
                 "_DEBUG",
