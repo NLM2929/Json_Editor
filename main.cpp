@@ -9,6 +9,7 @@
 #include<mutex>
 #include<algorithm>
 #include<cctype>
+#include<sstream>
 #include"raylib.h"
 #include"raymath.h"
 #define RAYGUI_IMPLEMENTATION
@@ -18,16 +19,13 @@
 #define TOTAL_AUTO_SAVE_PER_FILE 10
 #define TOTAL_MESSAGE 500
 
-struct TextureList{
-    std::vector<std::string> textures;
-    unsigned short target_layer = 0;
-};
 
 struct MapData{
     int width = 0, height = 0, tileSize = 0;
     std::string min_version = "", max_version = "";
-    std::vector<std::vector<unsigned short>> layers;
-    std::vector<TextureList> textureLists;
+    std::vector<unsigned short> texture_layer;
+    std::vector<unsigned short> collision_layer;
+    std::vector<std::string> textures;
 };
 
 bool running = true;
@@ -52,66 +50,57 @@ void Print(std::string msg){
 int InitMap(MapData& mapData, std::filesystem::path name, bool checked = false){
     name.replace_extension(".json");
     if(std::filesystem::exists(name)&&!checked) {return 1;}
-    mapData.layers.push_back(std::vector<unsigned short>(mapData.width*mapData.height, 0));
+    mapData.texture_layer = std::vector<unsigned short>(mapData.width*mapData.height, 0);
+    mapData.collision_layer = std::vector<unsigned short>(mapData.width*mapData.height, 0);
     return 0;
 }
 
-int SaveMap(MapData& map, std::string filename){
+int SaveMap(MapData& map, std::string filename, bool test_mode = false){
     filename += ".json";
-    std::ofstream file(filename);
-    if(!file.is_open()) {return 1;}
+    std::ostringstream oss;
     std::string indent = "\t";
-    file << "{\n"
+    oss << "{\n"
     << indent << "\"width\": " << map.width << ",\n"
     << indent << "\"height\": " << map.height << ",\n"
     << indent << "\"tileSize\": " << map.tileSize << ",\n"
     << indent << "\"min_version\": \"" << map.min_version << "\",\n"
     << indent << "\"max_version\": \"" << map.max_version << "\",\n"
-    << indent << "\"layers\": [\n";
-    for(size_t i = 0; i < map.layers.size(); i++){
-        file << indent << indent << "[\n" << indent << indent << indent;
-        for(size_t j = 0; j < map.layers[i].size(); j++){
-            file << map.layers[i][j];
-            if(j!=map.layers[i].size()-1){
-                file << ", ";
-            }
-            if((j+1)%map.width==0){
-                file << "\n";
-                if(j!=map.layers[i].size()-1){
-                    file << indent << indent << indent;
-                }
-            }
+    << indent << "\"texture_layers\": [\n";
+    for(size_t i = 0; i < map.texture_layer.size(); i++){
+        oss << indent << indent << map.texture_layer[i];
+        if(i!=map.texture_layer.size()-1){
+            oss << ",";
         }
-        file << "\n" << indent << indent << "]";
-        if(i!=map.layers.size()-1){
-            file << ",";
-        }
-        file << "\n";
+        oss << "\n";
     }
-    file << indent << "],\n";
-    file << indent << "\"textureLists\": [\n";
-    for(size_t i = 0; i < map.textureLists.size(); i++){
-        file << indent << indent << "{\n" << indent << indent << indent
-        << "\"target_layer\": " << map.textureLists[i].target_layer << ",\n"
-        << indent << indent << indent
-        << "\"textures\": [\n";
-        for(size_t j = 0; j < map.textureLists[i].textures.size(); j++){
-            file << indent << indent << indent << indent
-            << "\"" << map.textureLists[i].textures[j] << "\"";
-            if(j!=map.textureLists[i].textures.size()-1){
-                file << ",";
-            }
-            file << "\n";
+    oss << indent << "],\n" << indent << "\"collision_layer\": [\n";
+    for(size_t i = 0; i < map.collision_layer.size(); i++){
+        oss << indent << indent << map.collision_layer[i];
+        if(i!=map.collision_layer.size()-1){
+            oss << ",";
         }
-        file << indent << indent << indent << "]\n";
-        file << indent << indent << "}";
-        if(i!=map.textureLists.size()-1){
-            file << ",";
-        }
-        file << "\n";
+        oss << "\n";
     }
-    file << indent << "]\n";
-    file << "}";
+    oss << indent << "],\n" << indent << "\"textures\": [\n";
+    for(size_t i = 0; i < map.textures.size(); i++){
+        oss << indent << indent << map.textures[i];
+        if(i!=map.textures.size()-1){
+            oss << ",";
+        }
+    }
+    oss << indent << "]\n";
+    oss << "}";
+    if(test_mode){
+        Print(oss.str());
+        return 0;
+    }
+    std::ofstream file(filename);
+    file.open(filename);
+    if(!file.is_open()){
+        Print("Failed to open file: " + filename);
+        return 1;
+    }
+    file << oss.str();
     file.close();
     Print(TextFormat("Saved map to %s\n", filename.c_str()));
     return 0;
@@ -163,14 +152,15 @@ int LoadMap(MapData& mapData, std::string name){
     mapData.tileSize = j["tileSize"];
     mapData.min_version = j["min_version"];
     mapData.max_version = j["max_version"];
-    for(const auto& layer_json : j["layers"]){
-        std::vector<unsigned short> layer;
-        for(const auto& tile : layer_json){
-            layer.push_back(tile);
-        }
-        mapData.layers.push_back(layer);
+    for(auto& tile : j["texture_layer"]){
+        mapData.texture_layer.push_back(tile);
     }
-
+    for(auto& tile : j["collision_layer"]){
+        mapData.collision_layer.push_back(tile);
+    }
+    for(auto& tl : j["textures"]){
+        mapData.textures.push_back(tl);
+    }
     file.close();
     return 0;
 }
@@ -239,7 +229,6 @@ int main(){
     GuiLoadStyle("./style_dark.rgs");
     MapData map = {0};
     bool IsReady = false;
-    std::size_t current_layer = 0;
     std::thread CLI_Thread([&IsReady](){
         initscr();
         cbreak();
@@ -264,12 +253,12 @@ int main(){
             if(IsReady){
                 ch = getch();
             }
-            if(GetMouseWheelMove()>0){
+            if(GetMouseWheelMove()>0||ch==KEY_UP){
                 if(top_line>0){
                     top_line--;
                 }
             } else
-            if(GetMouseWheelMove()<0){
+            if(GetMouseWheelMove()<0||ch==KEY_DOWN){
                 if(top_line < TOTAL_MESSAGE - (h - 4)){
                     top_line++;
                 }
@@ -320,8 +309,12 @@ int main(){
     char state = 1, error_state = 0;
     std::string file_name("Untitled");
     std::string path("./JsonFiles/");
+    std::vector<Texture2D> textures;
+    std::vector<Color> tile_prop_color = {
+        RED, GREEN, BLUE, YELLOW, MAGENTA, SKYBLUE
+    };
     bool editing[4] = {0}, saved = false;
-    auto Parse = [&map, &current_layer, &saved](){
+    auto Parse = [&map, &saved, &textures, &tile_prop_color](){
         if(!send) {return;}
         std::vector<std::string> tokens({std::string()});
         {
@@ -338,81 +331,20 @@ int main(){
         }
         if(tokens.empty()) {return;}
         unsigned int level = 0;
-        if(tokens[level]=="layers"){
+        if(tokens[level]=="layer"){
             level++;
-            if(tokens[level]=="add"){
-                map.layers.push_back(std::vector<unsigned short>(map.width*map.height, 0));
-            } else
-            if(tokens[level]=="delete"){
-                map.layers.erase(map.layers.begin()+std::stoi(tokens[++level]));
-            } else
-            if(tokens[level]=="change"){
-                current_layer = std::stoi(tokens[++level]);
-            } else
             if(tokens[level]=="clear"){
-                if(std::ranges::all_of(tokens[++level], [](char c){return std::isdigit(c);})){
-                    std::fill(map.layers[std::stoi(tokens[level])].begin(), map.layers[std::stoi(tokens[level])].end(), 0);
-                } else {
-                    for(auto& tile : map.layers[current_layer]){
-                        tile = 0;
-                    }
-                }
-            } else
-            if(tokens[level++]=="texture"){
-                if(tokens[level]=="list"){
-                    for(size_t i = 0; i < map.textureLists.size(); i++){
-                        Print(TextFormat("Texture List %d (target layer: %d):", i, map.textureLists[i].target_layer));
-                        for(size_t j = 0; j < map.textureLists[i].textures.size(); j++){
-                            Print(TextFormat("\t%d: %s", j, map.textureLists[i].textures[j].c_str()));
-                        }
-                    }
+                if(tokens[level+1]=="texture"||tokens[level+1]=="texture_layer"||tokens[level+1]=="-tl"){
+                    std::fill(map.texture_layer.begin(), map.texture_layer.end(), 0);
+                    Print("Cleared texture layer");
                 } else
-                if(tokens[level]=="add"){
-                    TextureList tl;
-                    if(auto it = std::find(tokens.begin(), tokens.end(), "-tl"); it!=tokens.end()){
-                        if(it+1!=tokens.end()&&std::ranges::all_of(*(it+1), [](char c){return std::isdigit(c);})){
-                            tl.target_layer = std::stoi(*it);
-                        }
-                    }
-                    if(auto it = std::find(tokens.begin(), tokens.end(), "-ts"); it!=tokens.end()){
-                        if(it+1!=tokens.end()){
-                            for(auto c : *(it+1)){
-                                if(c==','){
-                                    tl.textures.push_back(std::string());
-                                    continue;
-                                }
-                                if(!tl.textures.empty()){
-                                    tl.textures.back().push_back(c);
-                                } else {
-                                    tl.textures.push_back(std::string(1, c));
-                                }
-                            }
-                        }
-                    }
-                    map.textureLists.push_back(tl);
-                } else
-                if(tokens[level]=="remove"){
-                    auto& textures = map.textureLists[std::stoi(tokens[++level])].textures;
-                    textures.erase(std::remove(textures.begin(), textures.end(), tokens[++level]), textures.end());
-                } else
-                if(tokens[level]=="edit"){
-                    unsigned short list_index = std::stoi(tokens[++level]);
-                    auto& texturelist = map.textureLists[list_index];
-                    if(auto it = std::find(tokens.begin(), tokens.end(), "-tl"); it!=tokens.end()){
-                        if(it+1!=tokens.end()&&std::ranges::all_of(*(it+1), [](char c){return std::isdigit(c);})){
-                            texturelist.target_layer = std::stoi(*it);
-                        }
-                    }
-                    if(auto it = std::find(tokens.begin(), tokens.end(), "-ts-add"); it!=tokens.end()){
-                        if(it+1!=tokens.end()&&std::ranges::all_of(*(it+1), [](char c){return std::isdigit(c);})){
-                            texturelist.textures.push_back(*it);
-                        }
-                    }
-                    if(auto it = std::find(tokens.begin(), tokens.end(), "-ts-remove"); it!=tokens.end()){
-                        if(it+1!=tokens.end()&&std::ranges::all_of(*(it+1), [](char c){return std::isdigit(c);})){
-                            texturelist.textures.erase(it+1);
-                        }
-                    }
+                if(tokens[level+1]=="collision"||tokens[level+1]=="collision_layer"||tokens[level+1]=="-cl"){
+                    std::fill(map.collision_layer.begin(), map.collision_layer.end(), 0);
+                    Print("Cleared collision layer");
+                } else{
+                    std::fill(map.texture_layer.begin(), map.texture_layer.end(), 0);
+                    std::fill(map.collision_layer.begin(), map.collision_layer.end(), 0);
+                    Print("Cleared all layers");
                 }
             }
         } else
@@ -427,10 +359,14 @@ int main(){
                 Print("Set max_version to " + tokens[level]);
             }
         } else
-        if(tokens[level]=="test-100-msgs"){
-            for(int i = 0; i < 100; i++){
-                Print("Test message " + std::to_string(i+1));
-            }
+        if(tokens[level]=="test"){
+            level++;
+            if(tokens[level]=="100-msgs"){
+                for(int i = 0; i < 100; i++){
+                    Print("Test message " + std::to_string(i+1));
+                }
+            } else
+            if(tokens[level]=="output-text-json"){}
         } else
         if(tokens[level]=="save"){
             saved = true;
@@ -489,10 +425,10 @@ int main(){
                                 // }
                                 // file_name = candidate.filename().string();
                             unsigned short subfix = 1;
-                            std::string candinate = file_name + "_" + std::to_string(subfix);
+                            std::string candinate = file_name + std::to_string(subfix);
                             while(FileExists((path + candinate + ".json").c_str())){
                                 Print("Checking if " + path + candinate + ".json exists");
-                                candinate = file_name + "_" + std::to_string(++subfix);
+                                candinate = file_name + std::to_string(++subfix);
                             }
                             file_name = candinate;
                             Print("Renamed file to: " + path + file_name);
@@ -593,7 +529,7 @@ int main(){
         if((MLB||MRB)&&!(MLB&&MRB)){
             if (tileX >= 0 && tileX < map.width &&
                 tileY >= 0 && tileY < map.height){
-                map.layers[current_layer][tileY * map.width + tileX] = MLB ? 1 : 0;
+                map.texture_layer[tileY * map.width + tileX] = MLB ? 1 : 0;
             }
         }
         if(((IsKeyDown(KEY_LEFT_CONTROL)||IsKeyDown(KEY_RIGHT_CONTROL))
@@ -613,9 +549,18 @@ int main(){
         DrawGrid2D(cam, map.width, map.height, map.tileSize);
         for(int y = 0; y < map.height; y++){
             for(int x = 0; x < map.width; x++){
-                if (map.layers[current_layer][y * map.width + x] == 1){
-                    DrawRectangle(x*map.tileSize, y*map.tileSize, map.tileSize, map.tileSize, BLUE);
+                if(map.texture_layer[y * map.width + x] != 0){
+                    DrawTextureRec(
+                        textures[map.texture_layer[y * map.width + x] - 1],
+                        (Rectangle){x*map.tileSize, y*map.tileSize, map.tileSize, map.tileSize},
+                        (Vector2){0, 0}, WHITE
+                    );
                 }
+                DrawRectangle(
+                    x*map.tileSize, y*map.tileSize,
+                    map.tileSize, map.tileSize,
+                    Fade(WHITE, 0.25f)
+                );
             }
         }
         EndMode2D();
